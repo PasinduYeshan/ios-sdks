@@ -12,6 +12,11 @@ final class VerifyAttributeTests: XCTestCase {
      "data":{"additionalData":{"maskedDestination":"a***@example.com","otpLength":"6"}}}
     """
 
+    // Only this suite's flow calls; another suite's background request can land after `reset()`.
+    private var flowRequests: [StubBackend.Recorded] {
+        StubBackend.requests.filter { $0.request.url?.path.hasSuffix("/flow/execute") == true }
+    }
+
     override func setUp() {
         super.setUp()
         StubBackend.reset()
@@ -63,8 +68,8 @@ final class VerifyAttributeTests: XCTestCase {
         XCTAssertEqual(response.flowId, "exec-1")
         XCTAssertEqual(response.flowStatus, .promptOnly)
         XCTAssertEqual(response.data?.additionalData?["maskedDestination"]?.value as? String, "a***@example.com")
-        let sent = try XCTUnwrap(StubBackend.requests.first)
-        XCTAssertEqual(StubBackend.requests.count, 1)
+        let sent = try XCTUnwrap(flowRequests.first)
+        XCTAssertEqual(flowRequests.count, 1)
         XCTAssertEqual(sent.request.httpMethod, "POST")
         XCTAssertEqual(sent.request.url?.absoluteString, "\(baseUrl)/flow/execute")
         XCTAssertEqual(sent.header("Authorization"), "Bearer user-token")
@@ -82,7 +87,7 @@ final class VerifyAttributeTests: XCTestCase {
 
         _ = try await client.verifyAttribute("mobile_number", handle: "custom-verification")
 
-        let body = try XCTUnwrap(StubBackend.requests.first?.json)
+        let body = try XCTUnwrap(flowRequests.first?.json)
         XCTAssertEqual(body["handle"] as? String, "custom-verification")
         XCTAssertEqual(body["inputs"] as? [String: String], ["attribute": "mobile_number"])
     }
@@ -92,7 +97,7 @@ final class VerifyAttributeTests: XCTestCase {
 
         await assertThrows(.invalidInput) { _ = try await client.verifyAttribute("email", handle: " ") }
         await assertThrows(.invalidInput) { _ = try await client.verifyAttribute("", handle: "h") }
-        XCTAssertTrue(StubBackend.requests.isEmpty)
+        XCTAssertTrue(flowRequests.isEmpty)
     }
 
     func testRequiresInitialization() async {
@@ -116,7 +121,7 @@ final class VerifyAttributeTests: XCTestCase {
         ))
 
         XCTAssertEqual(response.flowStatus, .complete)
-        let sent = try XCTUnwrap(StubBackend.requests.first)
+        let sent = try XCTUnwrap(flowRequests.first)
         XCTAssertEqual(sent.header("Authorization"), "Bearer user-token")
         let body = try XCTUnwrap(sent.json)
         XCTAssertEqual(body["executionId"] as? String, "exec-1")
@@ -136,7 +141,7 @@ final class VerifyAttributeTests: XCTestCase {
             challengeToken: "ct-1"
         ))
 
-        let body = try XCTUnwrap(StubBackend.requests.first?.json)
+        let body = try XCTUnwrap(flowRequests.first?.json)
         XCTAssertNil(body["inputs"])
         XCTAssertEqual(body["action"] as? String, "action_email_resend")
     }
@@ -147,7 +152,7 @@ final class VerifyAttributeTests: XCTestCase {
         await assertThrows(.invalidInput) {
             _ = try await client.verifyAttribute(payload: EmbeddedSignInPayload(actionId: "a", inputs: ["otp": "1"]))
         }
-        XCTAssertTrue(StubBackend.requests.isEmpty)
+        XCTAssertTrue(flowRequests.isEmpty)
     }
 
     // MARK: - URL
@@ -159,11 +164,11 @@ final class VerifyAttributeTests: XCTestCase {
         _ = try await client.verifyAttribute("email")
         _ = try await client.verifyAttribute(payload: EmbeddedSignInPayload(flowId: "exec-1"))
 
-        XCTAssertEqual(StubBackend.requests.map { $0.request.url?.absoluteString }, [
+        XCTAssertEqual(flowRequests.map { $0.request.url?.absoluteString }, [
             "\(baseUrl)/flow/execute",
             "\(baseUrl)/flow/execute"
         ])
-        XCTAssertTrue(StubBackend.requests.allSatisfy { $0.header("Authorization") == "Bearer user-token" })
+        XCTAssertTrue(flowRequests.allSatisfy { $0.header("Authorization") == "Bearer user-token" })
     }
 
     // MARK: - Refusals
